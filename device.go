@@ -47,6 +47,42 @@ func InitByName(name string) (*Device, error) {
 	return &Device{cryptDevice: cryptDevice}, nil
 }
 
+// InitByNameAndHeader initializes a crypt device from a provided active device 'name' and a header device 'headerDevice'.
+// Returns a pointer to the newly allocated Device or any error encountered.
+// C equivalent: crypt_init_by_name_and_header
+func InitByNameAndHeader(device, headerDevice string) (*Device, error) {
+	activeCryptDeviceName := C.CString(device)
+	defer C.free(unsafe.Pointer(activeCryptDeviceName))
+
+	activeHeaderDeviceName := C.CString(headerDevice)
+	defer C.free(unsafe.Pointer(activeHeaderDeviceName))
+
+	var cryptDevice *C.struct_crypt_device
+	if err := int(C.crypt_init_by_name_and_header(&cryptDevice, activeCryptDeviceName, activeHeaderDeviceName)); err < 0 {
+		return nil, &Error{functionName: "crypt_init_by_name_and_header", code: err}
+	}
+
+	return &Device{cryptDevice: cryptDevice}, nil
+}
+
+// InitDataDevice initializes a crypt device from the provided header and data device.
+// Returns a pointer to the newly allocated Device or any error encountered.
+// C equivalent: crypt_init_data_device
+func InitDataDevice(headerDevice, dataDevice string) (*Device, error) {
+	headerDeviceName := C.CString(headerDevice)
+	defer C.free(unsafe.Pointer(headerDeviceName))
+
+	dataDeviceName := C.CString(dataDevice)
+	defer C.free(unsafe.Pointer(dataDeviceName))
+
+	var cryptDevice *C.struct_crypt_device
+	if err := int(C.crypt_init_data_device(&cryptDevice, headerDeviceName, dataDeviceName)); err < 0 {
+		return nil, &Error{functionName: "crypt_init_data_device", code: err}
+	}
+
+	return &Device{cryptDevice: cryptDevice}, nil
+}
+
 // Free releases crypt device context and used memory.
 // C equivalent: crypt_free
 func (device *Device) Free() bool {
@@ -56,6 +92,22 @@ func (device *Device) Free() bool {
 		return true
 	}
 	return false
+}
+
+// HeaderBackup backs up the header of the current active device to 'backupFile'.
+// C equivalent: crypt_header_backup
+func (device *Device) HeaderBackup(deviceType DeviceType, backupFile string) error {
+	cryptBackupFile := C.CString(backupFile)
+	defer C.free(unsafe.Pointer(cryptBackupFile))
+
+	typeName := C.CString(deviceType.Name())
+	defer C.free(unsafe.Pointer(typeName))
+
+	err := C.crypt_header_backup(device.cryptDevice, typeName, cryptBackupFile)
+	if err < 0 {
+		return &Error{functionName: "crypt_header_backup", code: int(err)}
+	}
+	return nil
 }
 
 // C equivalent: crypt_dump
