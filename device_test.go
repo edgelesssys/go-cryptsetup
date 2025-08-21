@@ -2,6 +2,7 @@ package cryptsetup
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -362,4 +363,105 @@ func Test_Device_TokenAssignKeyslot(test *testing.T) {
 
 	err = device.TokenIsAssigned(tokenID, keyslot)
 	testWrapper.AssertError(err)
+}
+
+func Test_Device_HeaderBackup(t *testing.T) {
+	testWrapper := TestWrapper{t}
+
+	device, err := Init(DevicePath)
+	testWrapper.AssertNoError(err)
+	defer device.Free()
+
+	err = device.Format(LUKS2{SectorSize: 512}, GenericParams{Cipher: "aes", CipherMode: "xts-plain64", VolumeKeySize: 512 / 8})
+	testWrapper.AssertNoError(err)
+
+	backupFile := t.TempDir() + "/backupFile"
+	err = device.HeaderBackup(LUKS2{}, backupFile)
+	testWrapper.AssertNoError(err)
+
+	backupFileContent, err := os.ReadFile(backupFile)
+	testWrapper.AssertNoError(err)
+
+	if len(backupFileContent) == 0 {
+		t.Error("Backup file should not be empty")
+	}
+}
+
+func Test_Device_InitByNameAndHeader(t *testing.T) {
+	testWrapper := TestWrapper{t}
+
+	device, err := Init(DevicePath)
+	testWrapper.AssertNoError(err)
+	defer device.Free()
+
+	genericParams := GenericParams{Cipher: "aes", CipherMode: "xts-plain64", VolumeKeySize: 512 / 8}
+	err = device.Format(LUKS2{SectorSize: 512}, genericParams)
+	testWrapper.AssertNoError(err)
+
+	headerBackup := t.TempDir() + "/headerBackup"
+	err = device.HeaderBackup(LUKS2{}, headerBackup)
+	testWrapper.AssertNoError(err)
+
+	err = device.ActivateByVolumeKey(DeviceName, "", genericParams.VolumeKeySize, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertNoError(err)
+
+	headerDeviceName, cleanup := createLoopbackDevice(headerBackup)
+	defer cleanup()
+
+	deviceByHeader, err := InitByNameAndHeader(DeviceName, headerDeviceName)
+	testWrapper.AssertNoError(err)
+	defer deviceByHeader.Free()
+
+	err = deviceByHeader.Deactivate(DeviceName)
+	testWrapper.AssertNoError(err)
+
+	if deviceByHeader.GetUUID() != device.GetUUID() {
+		t.Errorf("Expected UUID to be %s, got %s", device.GetUUID(), deviceByHeader.GetUUID())
+	}
+}
+
+func Test_Device_InitDataDevice(t *testing.T) {
+	testWrapper := TestWrapper{t}
+
+	device, err := Init(DevicePath)
+	testWrapper.AssertNoError(err)
+	defer device.Free()
+
+	genericParams := GenericParams{Cipher: "aes", CipherMode: "xts-plain64", VolumeKeySize: 512 / 8}
+	err = device.Format(LUKS2{SectorSize: 512}, genericParams)
+	testWrapper.AssertNoError(err)
+
+	passphrase := "testPassphrase"
+	err = device.KeyslotAddByVolumeKey(0, "", passphrase)
+	testWrapper.AssertNoError(err)
+
+	headerBackup := t.TempDir() + "/headerBackup"
+	err = device.HeaderBackup(LUKS2{}, headerBackup)
+	testWrapper.AssertNoError(err)
+
+	err = device.ActivateByPassphrase(DeviceName, 0, passphrase, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertNoError(err)
+
+	originalUUID := device.GetUUID()
+
+	err = device.Deactivate(DeviceName) // Immediately deactivate the device, we want to test initializing from detached header
+	testWrapper.AssertNoError(err)
+
+	headerDeviceName, cleanup := createLoopbackDevice(headerBackup)
+	defer cleanup()
+
+	deviceByHeader, err := InitDataDevice(headerDeviceName, DevicePath)
+	testWrapper.AssertNoError(err)
+	defer deviceByHeader.Free()
+	testWrapper.AssertNoError(deviceByHeader.Load(nil))
+
+	err = deviceByHeader.ActivateByPassphrase(DeviceName, 0, passphrase, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertNoError(err)
+
+	err = deviceByHeader.Deactivate(DeviceName)
+	testWrapper.AssertNoError(err)
+
+	if deviceByHeader.GetUUID() != originalUUID {
+		t.Errorf("Expected UUID to be %s, got %s", originalUUID, deviceByHeader.GetUUID())
+	}
 }

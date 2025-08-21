@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -84,6 +85,20 @@ func teardown(devicePath string) {
 func resize(devicePath string) {
 	if err := exec.Command("/bin/dd", "if=/dev/zero", fmt.Sprintf("of=%s", devicePath), "bs=32M", "count=1", "oflag=append", "conv=notrunc").Run(); err != nil {
 		panic(err)
+	}
+}
+
+func createLoopbackDevice(filePath string) (string, func()) {
+	cmd := exec.Command("losetup", "--show", "-f", filePath)
+	cmdOutput, err := cmd.Output()
+	if err != nil {
+		panic(err)
+	}
+	loopbackDevice := strings.TrimSpace(string(cmdOutput))
+	return loopbackDevice, func() {
+		if err := exec.Command("losetup", "-d", loopbackDevice).Run(); err != nil {
+			panic(err)
+		}
 	}
 }
 
