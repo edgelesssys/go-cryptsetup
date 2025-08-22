@@ -387,6 +387,62 @@ func Test_Device_HeaderBackup(t *testing.T) {
 	}
 }
 
+func Test_Device_HeaderRestore(t *testing.T) {
+	testWrapper := TestWrapper{t}
+
+	device, err := Init(DevicePath)
+	testWrapper.AssertNoError(err)
+	defer device.Free()
+
+	err = device.Format(LUKS2{SectorSize: 512}, GenericParams{Cipher: "aes", CipherMode: "xts-plain64", VolumeKeySize: 512 / 8})
+	testWrapper.AssertNoError(err)
+
+	originalPassphrase := "testPassphrase"
+	err = device.KeyslotAddByPassphrase(0, "", originalPassphrase)
+	testWrapper.AssertNoError(err)
+
+	// Create a backup of the header with the current passphrase
+	backupFile := t.TempDir() + "/backupFile"
+	err = device.HeaderBackup(LUKS2{}, backupFile)
+	testWrapper.AssertNoError(err)
+
+	// Add a new passphrase
+	newPassphrase := "newTestPassphrase"
+	err = device.KeyslotAddByPassphrase(1, originalPassphrase, newPassphrase)
+	testWrapper.AssertNoError(err)
+
+	// Activate with original passphrase
+	err = device.ActivateByPassphrase(DeviceName, 0, originalPassphrase, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertNoError(err)
+	err = device.Deactivate(DeviceName)
+	testWrapper.AssertNoError(err)
+
+	err = device.ActivateByPassphrase(DeviceName, 1, newPassphrase, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertNoError(err)
+	err = device.Deactivate(DeviceName)
+	testWrapper.AssertNoError(err)
+
+	// Restore the header from the backup
+	err = device.HeaderRestore(LUKS2{}, backupFile)
+	testWrapper.AssertNoError(err)
+
+	restoredDevice, err := Init(DevicePath)
+	testWrapper.AssertNoError(err)
+	defer restoredDevice.Free()
+	err = restoredDevice.Load(LUKS2{})
+	testWrapper.AssertNoError(err)
+
+	// New passphrase doesn't work anymore (because it's not in the original header)
+	err = restoredDevice.ActivateByPassphrase(DeviceName, 1, newPassphrase, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertError(err)
+
+	// Old passphrase still works
+	err = restoredDevice.ActivateByPassphrase(DeviceName, 0, originalPassphrase, CRYPT_ACTIVATE_READONLY)
+	testWrapper.AssertNoError(err)
+	err = device.Deactivate(DeviceName)
+	testWrapper.AssertNoError(err)
+}
+
 func Test_Device_InitByNameAndHeader(t *testing.T) {
 	testWrapper := TestWrapper{t}
 

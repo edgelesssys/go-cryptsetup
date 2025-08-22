@@ -110,6 +110,22 @@ func (device *Device) HeaderBackup(deviceType DeviceType, backupFile string) err
 	return nil
 }
 
+// HeaderRestore restores the header of the current active device from 'backupFile'.
+// C equivalent: crypt_header_restore
+func (device *Device) HeaderRestore(deviceType DeviceType, backupFile string) error {
+	cryptBackupFile := C.CString(backupFile)
+	defer C.free(unsafe.Pointer(cryptBackupFile))
+
+	typeName := C.CString(deviceType.Name())
+	defer C.free(unsafe.Pointer(typeName))
+
+	err := C.crypt_header_restore(device.cryptDevice, typeName, cryptBackupFile)
+	if err < 0 {
+		return &Error{functionName: "crypt_header_restore", code: int(err)}
+	}
+	return nil
+}
+
 // C equivalent: crypt_dump
 func (device *Device) Dump() int {
 	return int(C.crypt_dump(device.cryptDevice))
